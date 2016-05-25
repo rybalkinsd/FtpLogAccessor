@@ -11,13 +11,14 @@
     <properties>
         <org.slf4j.slf4j-api.version>1.7.5</org.slf4j.slf4j-api.version>
         <ch.qos.logback.version>1.0.13</ch.qos.logback.version>
+        <commons.net.version>3.3</commons.net.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>commons-net</groupId>
             <artifactId>commons-net</artifactId>
-            <version>3.3</version>
+            <version>${commons.net.version}</version>
         </dependency>
 
         <dependency>
@@ -65,13 +66,6 @@
                         </goals>
                     </execution>
                 </executions>
-            </plugin>
-            <plugin>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
-                </configuration>
             </plugin>
         </plugins>
     </build>
