@@ -2,13 +2,11 @@ package ru.mail;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.mail.ftp.MultipleAccessor;
 
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
-import java.util.stream.IntStream;
 
 /**
  * Created by s.rybalkin on 24.05.2016.
@@ -36,20 +34,11 @@ public class LogUploader {
             log.error("args[0] = login, args[1] = password.");
             return;
         }
-
-        IntStream.rangeClosed(1, serverNumber).forEach(x -> {
-            FtpAccessor accessor = null;
-            try {
-                accessor = new FtpAccessor(String.format(serverMask, x), args[0], args[1]);
-                accessor.connect();
-                accessor.downloadAll("/");
-            } catch (IOException e) {
-                log.error("Download failed: ", e);
-            } finally {
-                if (accessor != null) {
-                    accessor.disconnect();
-                }
-            }
-        });
+        try {
+            new MultipleAccessor(serverMask, serverNumber, args[0], args[1])
+                    .download();
+        } catch (InterruptedException e) {
+            log.error("Interrupted ", e);
+        }
     }
 }

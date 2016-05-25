@@ -1,4 +1,4 @@
-package ru.mail;
+package ru.mail.ftp;
 
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
@@ -10,7 +10,7 @@ import java.io.*;
 /**
  * Created by s.rybalkin on 24.05.2016.
  */
-public class FtpAccessor {
+class FtpAccessor implements AutoCloseable, Runnable {
     private static final Logger log = LoggerFactory.getLogger(FtpAccessor.class);
     private static final int PORT = 21;
 
@@ -18,40 +18,44 @@ public class FtpAccessor {
     private final String login;
     private final String password;
     private final String destinationDir;
-    private FTPClient client;
+    private final FTPClient client;
 
     public FtpAccessor(String server, String login, String password) {
         this.server = server;
         this.login = login;
         this.password = password;
         this.destinationDir = System.getProperty("user.dir");
+        this.client = new FTPClient();
     }
 
-    public void connect() throws IOException {
-        log.info("Connection started");
-        client = new FTPClient();
+    @Override
+    public void run() {
         try {
-            client.connect(server, PORT);
-            client.enterLocalPassiveMode();
-            client.login(login, password);
+            connect();
         } catch (IOException e) {
             log.warn("Connection failed", e);
-            throw e;
+            return;
         }
+
+        try {
+            downloadAll("/");
+        } catch (IOException e) {
+            log.warn("Download failed", e);
+        }
+    }
+
+    private void connect() throws IOException {
+        log.info("Connection started");
+        client.connect(server, PORT);
+        client.enterLocalPassiveMode();
+        client.login(login, password);
+
 
         log.info("Connected {}", server);
     }
 
-    public void disconnect() {
-        if (client != null) {
-            try {
-                log.info("Disconnected {}", server);
-                client.disconnect();
-            } catch (IOException ignore) { }
-        }
-    }
 
-    public void downloadAll(String dir) throws IOException {
+    private void downloadAll(String dir) throws IOException {
         for (FTPFile ftpFile : client.listFiles(dir)) {
             if (ftpFile.isDirectory()) {
                 downloadAll(dir + "/" + ftpFile.getName());
@@ -64,6 +68,20 @@ public class FtpAccessor {
                     download(path, destination);
                 }
             }
+        }
+    }
+
+    @Override
+    public void close() {
+        disconnect();
+    }
+
+    private void disconnect() {
+        if (client != null) {
+            try {
+                log.info("Disconnected {}", server);
+                client.disconnect();
+            } catch (IOException ignore) { }
         }
     }
 
@@ -94,5 +112,4 @@ public class FtpAccessor {
             } catch (IOException ignore) { }
         }
     }
-
 }

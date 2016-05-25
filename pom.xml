@@ -12,6 +12,7 @@
         <org.slf4j.slf4j-api.version>1.7.5</org.slf4j.slf4j-api.version>
         <ch.qos.logback.version>1.0.13</ch.qos.logback.version>
         <commons.net.version>3.3</commons.net.version>
+        <com.google.guava.version>18.0</com.google.guava.version>
     </properties>
 
     <dependencies>
@@ -31,6 +32,11 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>${org.slf4j.slf4j-api.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>${com.google.guava.version}</version>
         </dependency>
     </dependencies>
 
