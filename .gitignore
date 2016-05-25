@@ -1,0 +1,11 @@
+syntax: glob
+target/*
+.idea/*
+*.iml
+*/*.iml
+./*.iml
+/src/main/resources/config.properties
+
+
+syntax: regexp
+.*.iml
