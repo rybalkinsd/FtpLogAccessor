@@ -1,12 +1,16 @@
 syntax: glob
 target/*
+/.idea/
 .idea/*
 *.iml
 */*.iml
 ./*.iml
+.*.iml
 /src/main/resources/config.properties
 
-
-syntax: regexp
-.*.iml
 /logs/
+/gradlew
+/gradlew.bat
+/gradle/
+/build/
+/.gradle/

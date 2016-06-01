@@ -1,36 +1,37 @@
-package ru.mail.ftp;
+package ru.mail.ftp.singleserver;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.net.ftp.FTPClient;
-import org.apache.commons.net.ftp.FTPFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.net.SocketTimeoutException;
 import java.util.Arrays;
 import java.util.concurrent.*;
 import java.util.stream.IntStream;
 
 
 /**
- * Created by s.rybalkin on 27.05.2016.
+ * Created by s.rybalkin on 01.06.2016.
  */
 public class SingleServerAccessor implements Runnable {
     private static final Logger log = LoggerFactory.getLogger(SingleServerAccessor.class);
     private static final int PORT = 21;
     private static final String FILE_MASK = "FRAG.log";
-    private static final int WORKERS_NUMBER = 8;
+    private static final int WORKERS_NUMBER = 32;
 
     private final String server;
     private final String login;
     private final String password;
 
     private static final ThreadLocal<FTPClient> client = ThreadLocal.withInitial(FTPClient::new);
+
     private final BlockingQueue<SimpleFile> tasks = new LinkedBlockingQueue<>();
     private final ExecutorService executor;
     private final String destinationDir;
 
-    SingleServerAccessor(String server, String login, String password, String destinationDir) {
+    public SingleServerAccessor(String server, String login, String password, String destinationDir) {
         this.server = server;
         this.login = login;
         this.password = password;
@@ -47,7 +48,7 @@ public class SingleServerAccessor implements Runnable {
     public void run() {
         tasks.add(new SimpleFile());
         IntStream.range(0, WORKERS_NUMBER).forEach(x ->
-            executor.submit(new Worker())
+                executor.submit(new Worker())
         );
         executor.shutdown();
 
@@ -61,8 +62,9 @@ public class SingleServerAccessor implements Runnable {
     }
 
     private void connect() throws IOException {
-        log.info("Connection started");
 
+        log.info("Connection started");
+        client.get().setConnectTimeout(5000);
         client.get().connect(server, PORT);
         client.get().enterLocalPassiveMode();
         client.get().login(login, password);
@@ -70,7 +72,7 @@ public class SingleServerAccessor implements Runnable {
         log.info("Connected {}", server);
     }
 
-    private class Worker implements Runnable {
+    class Worker implements Runnable {
         @Override
         public void run() {
             FTPClient ftpClient = client.get();
@@ -79,7 +81,7 @@ public class SingleServerAccessor implements Runnable {
                     try {
                         connect();
                     } catch (IOException e) {
-                        log.warn("Connection failed", e);
+                        log.warn("Connection failed");
                         return;
                     }
                 }
@@ -105,15 +107,13 @@ public class SingleServerAccessor implements Runnable {
                                         log.info("Worker interruption.", e);
                                     }
                                 });
-                    }
-                    else if (file.getName().equals(FILE_MASK)) {
+                    } else if (file.getName().equals(FILE_MASK)) {
                         download(file.getFullPath());
                     }
                 } catch (IOException e) {
                     log.error("Download failed. Task: " + file, e);
                 }
             } while (!tasks.isEmpty() || !Thread.currentThread().isInterrupted());
-            log.info("Worker finished.");
         }
 
         private void download(String source) throws IOException {
@@ -134,49 +134,12 @@ public class SingleServerAccessor implements Runnable {
 
             } finally {
                 try {
-                    ftpClient.completePendingCommand();
+                    if (ftpClient.isConnected()) {
+                        ftpClient.completePendingCommand();
+                    }
                 } catch (IOException ignore) { }
             }
         }
     }
 
-    private class SimpleFile {
-        private final String path;
-        private final String name;
-        private final boolean directory;
-
-        SimpleFile() {
-            this.name = "";
-            this.path = "";
-            this.directory = true;
-        }
-
-        SimpleFile(FTPFile file, String directory) {
-            this.name = file.getName();
-            this.path = directory + "/";
-            this.directory = file.isDirectory();
-        }
-        String getFullPath() {
-            return path + name;
-        }
-
-        String getName() {
-            return name;
-        }
-
-        boolean isDirectory() {
-            return directory;
-        }
-
-        @Override
-        public String toString() {
-            return "SimpleFile{" +
-                    "path='" + path + '\'' +
-                    ", name='" + name + '\'' +
-                    ", directory=" + directory +
-                    '}';
-        }
-    }
 }
-
-
