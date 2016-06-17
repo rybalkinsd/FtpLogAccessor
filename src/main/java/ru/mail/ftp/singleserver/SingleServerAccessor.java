@@ -1,145 +1,108 @@
 package ru.mail.ftp.singleserver;
 
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
+import lombok.Setter;
 import org.apache.commons.net.ftp.FTPClient;
+import org.apache.commons.net.ftp.FTPFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import ru.mail.ftp.singleserver.utils.ClientPool;
+import ru.mail.ftp.singleserver.utils.MockFile;
 
 import java.io.*;
-import java.net.SocketTimeoutException;
-import java.util.Arrays;
-import java.util.concurrent.*;
-import java.util.stream.IntStream;
+import java.util.*;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ForkJoinPool;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 
-/**
- * Created by s.rybalkin on 01.06.2016.
- */
-public class SingleServerAccessor implements Runnable {
+public class SingleServerAccessor {
     private static final Logger log = LoggerFactory.getLogger(SingleServerAccessor.class);
-    private static final int PORT = 21;
     private static final String FILE_MASK = "FRAG.log";
-    private static final int WORKERS_NUMBER = 32;
+    private static final int THREAD_NUMBER = 24;
+    private static final ForkJoinPool forkJoinProcessingPool = new ForkJoinPool(THREAD_NUMBER);
 
-    private final String server;
-    private final String login;
-    private final String password;
+    @Setter
+    private ClientPool clientPool;
+    @Setter
+    private String destinationDir;
+    @Setter
+    private String server;
 
-    private static final ThreadLocal<FTPClient> client = ThreadLocal.withInitial(FTPClient::new);
 
-    private final BlockingQueue<SimpleFile> tasks = new LinkedBlockingQueue<>();
-    private final ExecutorService executor;
-    private final String destinationDir;
-
-    public SingleServerAccessor(String server, String login, String password, String destinationDir) {
-        this.server = server;
-        this.login = login;
-        this.password = password;
-        this.destinationDir = destinationDir;
-
-        executor = Executors.newCachedThreadPool(
-                new ThreadFactoryBuilder()
-                        .setNameFormat("SingleServerAccessor-%d-")
-                        .build());
-
-    }
-
-    @Override
-    public void run() {
-        tasks.add(new SimpleFile());
-        IntStream.range(0, WORKERS_NUMBER).forEach(x ->
-                executor.submit(new Worker())
-        );
-        executor.shutdown();
-
+    public void process() {
         try {
-            executor.awaitTermination(10, TimeUnit.MINUTES);
-        } catch (InterruptedException e) {
-            log.error("Interrupted.", e);
-        }
-        log.info("SingleServerAccessor {} finished.", server);
-        executor.shutdownNow();
-    }
-
-    private void connect() throws IOException {
-
-        log.info("Connection started");
-        client.get().setConnectTimeout(5000);
-        client.get().connect(server, PORT);
-        client.get().enterLocalPassiveMode();
-        client.get().login(login, password);
-
-        log.info("Connected {}", server);
-    }
-
-    class Worker implements Runnable {
-        @Override
-        public void run() {
-            FTPClient ftpClient = client.get();
-            do {
-                if (!ftpClient.isConnected()) {
-                    try {
-                        connect();
-                    } catch (IOException e) {
-                        log.warn("Connection failed");
-                        return;
-                    }
-                }
-
-                SimpleFile file;
-                try {
-                    file = tasks.poll(1, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
-                    log.info("Worker interruption.", e);
-                    return;
-                }
-                if (file == null) {
-                    return;
-                }
-                try {
-                    if (file.isDirectory()) {
-                        Arrays.stream(ftpClient.listFiles(file.getFullPath()))
-                                .map(x -> new SimpleFile(x, file.getFullPath()))
-                                .forEach(x -> {
-                                    try {
-                                        tasks.put(x);
-                                    } catch (InterruptedException e) {
-                                        log.info("Worker interruption.", e);
-                                    }
-                                });
-                    } else if (file.getName().equals(FILE_MASK)) {
-                        download(file.getFullPath());
-                    }
-                } catch (IOException e) {
-                    log.error("Download failed. Task: " + file, e);
-                }
-            } while (!tasks.isEmpty() || !Thread.currentThread().isInterrupted());
+            forkJoinProcessingPool.submit(() ->
+                listFiles(MockFile.ROOT).stream().parallel()
+                        .filter(x -> x.getName().matches(FILE_MASK))
+                        .map(MockFile::getFullPath)
+                        .forEach(this::download))
+                .get();
+        } catch (InterruptedException | ExecutionException e) {
+            log.error("Processing {} failed.", server);
         }
 
-        private void download(String source) throws IOException {
-            FTPClient ftpClient = client.get();
-            String destination = source.replaceAll("/", "@");
-            File file = new File(destinationDir + "/" + destination);
+        clientPool.shutdown();
+    }
+
+    private List<MockFile> listFiles(MockFile file) {
+        if (!file.isDirectory()) {
+            return Collections.singletonList(file);
+        }
+        Stream<FTPFile> stream;
+        FTPClient ftp = clientPool.borrowClient();
+        try {
+            stream = Arrays.stream(ftp.listFiles(file.getFullPath()));
+        } catch (IOException e) {
+            log.error("Listing failed: {}, server {}.", file.getFullPath(), server);
+            return Collections.emptyList();
+        } finally {
+            clientPool.returnClient(ftp);
+        }
+
+        return stream.parallel()
+                    .map(x -> new MockFile(x, file.getFullPath()))
+                    .map(this::listFiles)
+                    .flatMap(Collection::stream)
+                    .collect(Collectors.toList());
+    }
+
+    private void download(String source) {
+        String destination = source.replaceAll("/", "@");
+        File file = new File(destinationDir + "/" + destination);
+        try {
             file.createNewFile();
+        } catch (IOException e) {
+            log.error("Local file creation failed {}.", file.getAbsolutePath());
+            return;
+        }
 
-            log.info("Downloading: " + source + " to " + destination);
-            try (OutputStream outputStream = new BufferedOutputStream(new FileOutputStream(file));
-                 InputStream inputStream = ftpClient.retrieveFileStream(source)) {
+        FTPClient ftpClient = clientPool.borrowClient();
+        if (ftpClient == null) {
+            return;
+        }
 
-                byte[] buff = new byte[4096];
-                int bytesRead;
-                while ((bytesRead = inputStream.read(buff)) != -1) {
-                    outputStream.write(buff, 0, bytesRead);
-                }
+        log.info("Downloading: {} - {}", server, source);
+        try (OutputStream outputStream = new BufferedOutputStream(new FileOutputStream(file));
+             InputStream inputStream = ftpClient.retrieveFileStream(source)) {
 
-            } finally {
-                try {
-                    if (ftpClient.isConnected()) {
-                        ftpClient.completePendingCommand();
-                    }
-                } catch (IOException ignore) { }
+            byte[] buff = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buff)) != -1) {
+                outputStream.write(buff, 0, bytesRead);
             }
+
+            if (ftpClient.isConnected()) {
+                ftpClient.completePendingCommand();
+            }
+        } catch (IOException | NullPointerException e) {
+            // Do not get client reply
+            log.error("File transfer failed: {}.", source);
+        } finally {
+            clientPool.returnClient(ftpClient);
         }
     }
-
 }

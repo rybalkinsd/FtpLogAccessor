@@ -1,43 +1,17 @@
 package ru.mail;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import ru.mail.ftp.MultiServerAccessor;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.support.AbstractApplicationContext;
+import ru.mail.config.AppConfig;
+import ru.mail.ftp.MultipleServerAccessor;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Properties;
-
-/**
- * Created by s.rybalkin on 01.06.2016.
- */
 public class Downloader {
-    private static final Logger log = LoggerFactory.getLogger(Downloader.class);
 
-    public static void main(String[] args) {
-        if (args.length < 2)
-        {
-            log.error("args[0] = login, args[1] = password.");
-            return;
-        }
-        String serverMask;
-        int serverNumber;
-        Properties prop = new Properties();
-        ClassLoader loader = Thread.currentThread().getContextClassLoader();
-        try (InputStream stream = loader.getResourceAsStream("config.properties")) {
-            prop.load(stream);
-            serverMask = prop.getProperty("serverMask");
-            serverNumber = Integer.parseInt(prop.getProperty("serverNumber"));
-        } catch (IOException e) {
-            log.error("Incorrect properties", e);
-            throw new IllegalArgumentException(e);
-        }
-
-        try {
-            new MultiServerAccessor(serverMask, serverNumber, args[0], args[1])
-                    .download();
-        } catch (InterruptedException e) {
-            log.error("Interrupted ", e);
-        }
+    public static void main(String[] args) throws InterruptedException {
+        AbstractApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
+        context.registerShutdownHook();
+        MultipleServerAccessor accessor = (MultipleServerAccessor) context.getBean("multipleServerAccessor");
+        accessor.download();
     }
+
 }

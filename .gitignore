@@ -1,12 +1,8 @@
 syntax: glob
-target/*
 /.idea/
 .idea/*
 *.iml
-*/*.iml
 ./*.iml
-.*.iml
-/src/main/resources/config.properties
 
 /logs/
 /gradlew
@@ -14,3 +10,5 @@ target/*
 /gradle/
 /build/
 /.gradle/
+/out/
+/src/main/resources/credentials.properties
